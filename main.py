@@ -1,31 +1,37 @@
 import csv
 from dateutil.parser import parse
-from dateutil.tz import gettz
+from dateutil import tz
 from ics import Calendar, Event
 from pytz import timezone
 import sys
+import re
 
 from bs4 import BeautifulSoup
 
+add_default_tz = lambda x, tzinfo: x.replace(tzinfo=x.tzinfo or tzinfo)
+
+MDT = tz.gettz("US/Mountain")
+parsed_dt = lambda s: add_default_tz(parse(s), MDT)
 
 def find_sessions(soup):
     "Parse HTML file and extract session info"
-    sessions = soup.findAll('div', class_="xExpand")
+    sessions = soup.findAll('div', class_="agenda-item")
     for session in sessions:
-        date = session.find('div', {"class": "xDate"})
-        title = session.find('div', {"class": "xTitle"})
-        abstract = session.find('div', {"class": "xAbstract"})
-        a = list(abstract.strings)
+        date = session.find('div', {"class": "time"}).next_element.next_sibling
+        title = session.find('h3', {"class": "title"}).text
+        speakers = session.findAll('div', {"class": "speaker"})
+        abstract = session.find('span', {"class": "excerpt"}).text
         yield {
-            'date': parse(date.text, tzinfos={"MDT": -6 * 3600}),
-            'title': title.text,
-            'author': a[0].lstrip(':'),
-            'abstract': "".join(a[1:])
+            'begin': parsed_dt(date.split('-')[0]),
+            'end': parsed_dt(re.sub(r'\d\d:\d\d - ', '', date)),
+            'title': title,
+            'author': ', '.join([speaker.next.text for speaker in speakers]),
+            'abstract': abstract
         }
 
 
-def main(args):
-    with open(args[1], 'r') as f:
+def main(filepath):
+    with open(filepath, 'r') as f:
         soup = BeautifulSoup(f.read(), features="html.parser")
         # sessions = soup.findAll('div', {"class": "xExpand"})
 
@@ -37,7 +43,9 @@ def main(args):
                 for session in find_sessions(soup):
                     e = Event()
                     e.name = session['title']
-                    e.begin = session['date'].astimezone(timezone('US/Pacific'))  #.strftime("%Y%m%d %H:%M:%S")      # '20140101 00:00:00'
+                    e.begin = session['begin'].astimezone(timezone('US/Pacific'))  #.strftime("%Y%m%d %H:%M:%S")      # '20140101 00:00:00'
+                    e.end = session['end'].astimezone(timezone('US/Pacific'))
+                    e.description = session['abstract']
                     calendar.events.add(e)
                     csvwriter.writerow(session.values())
         finally:
@@ -46,7 +54,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    main(sys.argv)
+    main('/Users/mvandend/dev/identiverse2020/Identiverse2020.htm')
 
 
 # <div class="xDate"
